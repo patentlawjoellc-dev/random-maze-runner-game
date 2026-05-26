@@ -20,4 +20,8 @@ Keep this as an original arcade-chase game. Do not copy Pac-Man/Ms. Pac-Man copy
 - Preserve keyboard controls: arrow keys and WASD.
 - Preserve touch/mobile directional controls.
 - Preserve high-score entry and localStorage scoreboard.
+- Player movement is one tile per key press/click; do not reintroduce automatic forward movement.
+- Side tunnel exits should wrap horizontally to the other side of the board.
+- Pellets/power pellets should be filtered to reachable cells only.
+- Death should play a short sound and respawn the player at a random safe reachable location; game over should play a distinct sound.
 - The user wants project-specific context retained in this file and mirrored via `CLOUDCODE.md`.

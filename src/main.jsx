@@ -46,6 +46,42 @@ const BOARD_KEY = 'arcadeChompHighScores';
 function clonePos(pos) { return { r: pos.r, c: pos.c }; }
 function posKey(pos) { return `${pos.r},${pos.c}`; }
 function samePos(a, b) { return a.r === b.r && a.c === b.c; }
+function distance(a, b) { return Math.abs(a.r - b.r) + Math.abs(a.c - b.c); }
+
+function normalizeHorizontal(board, pos) {
+  if (pos.c < 0) return { r: pos.r, c: board.cols - 1 };
+  if (pos.c >= board.cols) return { r: pos.r, c: 0 };
+  return pos;
+}
+
+function canMove(board, pos) {
+  const normalized = normalizeHorizontal(board, pos);
+  if (normalized.r < 0 || normalized.r >= board.rows) return false;
+  return !board.walls.has(posKey(normalized));
+}
+
+function moveWithWrap(board, pos, dir) {
+  const delta = DIRS[dir];
+  const candidate = normalizeHorizontal(board, { r: pos.r + delta.r, c: pos.c + delta.c });
+  return canMove(board, candidate) ? candidate : pos;
+}
+
+function reachableFrom(board, start) {
+  const seen = new Set([posKey(start)]);
+  const queue = [start];
+  while (queue.length) {
+    const current = queue.shift();
+    Object.keys(DIRS).forEach((dir) => {
+      const next = moveWithWrap(board, current, dir);
+      const key = posKey(next);
+      if (!seen.has(key)) {
+        seen.add(key);
+        queue.push(next);
+      }
+    });
+  }
+  return seen;
+}
 
 function parseBoard() {
   const walls = new Set();
@@ -70,7 +106,7 @@ function parseBoard() {
     { r: 7, c: 9 },
   ];
 
-  return {
+  const board = {
     rows: RAW_MAP.length,
     cols: RAW_MAP[0].length,
     walls,
@@ -78,7 +114,19 @@ function parseBoard() {
     powerPellets,
     playerStart,
     ghostStarts: [...ghostStarts, ...extraGhosts],
+    reachable: new Set(),
+    openCells: [],
   };
+
+  board.reachable = reachableFrom(board, playerStart);
+  board.pellets = new Set([...pellets].filter((key) => board.reachable.has(key)));
+  board.powerPellets = new Set([...powerPellets].filter((key) => board.reachable.has(key)));
+  board.openCells = [...board.reachable].map((key) => {
+    const [r, c] = key.split(',').map(Number);
+    return { r, c };
+  });
+
+  return board;
 }
 
 function makeGhosts(level, board) {
@@ -88,17 +136,23 @@ function makeGhosts(level, board) {
     start: clonePos(start),
     dir: ['left', 'right', 'up', 'down'][index % 4],
     color: GHOST_COLORS[index % GHOST_COLORS.length],
-    mode: 'scatter',
-    speedBias: Math.min(0.28 + level * 0.025, 0.55),
+    speedBias: Math.min(0.24 + level * 0.022, 0.5),
   }));
 }
 
+function randomSpawn(board, ghosts = []) {
+  const safe = board.openCells.filter((cell) => (
+    distance(cell, board.playerStart) > 2 &&
+    ghosts.every((ghost) => distance(cell, ghost.pos) > 5) &&
+    board.ghostStarts.every((ghostStart) => distance(cell, ghostStart) > 4)
+  ));
+  const pool = safe.length ? safe : board.openCells;
+  return clonePos(pool[Math.floor(Math.random() * pool.length)] || board.playerStart);
+}
+
 function loadScores() {
-  try {
-    return JSON.parse(localStorage.getItem(BOARD_KEY) || '[]');
-  } catch {
-    return [];
-  }
+  try { return JSON.parse(localStorage.getItem(BOARD_KEY) || '[]'); }
+  catch { return []; }
 }
 
 function saveScore(name, score, level) {
@@ -110,45 +164,51 @@ function saveScore(name, score, level) {
   return next;
 }
 
-function canMove(board, pos) {
-  if (pos.r < 0 || pos.c < 0 || pos.r >= board.rows || pos.c >= board.cols) return false;
-  return !board.walls.has(posKey(pos));
+function playToneSequence(notes) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+  const context = new AudioContext();
+  let time = context.currentTime;
+  notes.forEach(([frequency, duration, type = 'square']) => {
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(frequency, time);
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(0.08, time + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+    oscillator.connect(gain).connect(context.destination);
+    oscillator.start(time);
+    oscillator.stop(time + duration + 0.02);
+    time += duration * 0.88;
+  });
+  window.setTimeout(() => context.close(), Math.ceil((time - context.currentTime + 0.2) * 1000));
 }
 
-function nextPos(pos, dir) {
-  const delta = DIRS[dir];
-  return { r: pos.r + delta.r, c: pos.c + delta.c };
+function playDeathSound() {
+  playToneSequence([[440, .12], [330, .12], [220, .16], [140, .22, 'sawtooth']]);
+}
+
+function playGameOverSound() {
+  playToneSequence([[220, .18, 'sawtooth'], [185, .2, 'sawtooth'], [146, .24, 'sawtooth'], [98, .36, 'sawtooth']]);
 }
 
 function availableDirs(board, pos, currentDir) {
   const reverse = { up: 'down', down: 'up', left: 'right', right: 'left' }[currentDir];
-  return Object.keys(DIRS).filter((dir) => dir !== reverse && canMove(board, nextPos(pos, dir)));
+  return Object.keys(DIRS).filter((dir) => dir !== reverse && !samePos(moveWithWrap(board, pos, dir), pos));
 }
 
 function chooseGhostDir(board, ghost, player, frightened, tick) {
   const options = availableDirs(board, ghost.pos, ghost.dir);
-  const legal = options.length ? options : Object.keys(DIRS).filter((dir) => canMove(board, nextPos(ghost.pos, dir)));
+  const legal = options.length ? options : Object.keys(DIRS).filter((dir) => !samePos(moveWithWrap(board, ghost.pos, dir), ghost.pos));
   if (!legal.length) return ghost.dir;
 
   if (frightened) {
-    return legal.sort((a, b) => {
-      const pa = nextPos(ghost.pos, a);
-      const pb = nextPos(ghost.pos, b);
-      const da = Math.abs(pa.r - player.r) + Math.abs(pa.c - player.c);
-      const db = Math.abs(pb.r - player.r) + Math.abs(pb.c - player.c);
-      return db - da;
-    })[0];
+    return legal.sort((a, b) => distance(moveWithWrap(board, ghost.pos, b), player) - distance(moveWithWrap(board, ghost.pos, a), player))[0];
   }
 
   if (tick % 5 === ghost.id) return legal[Math.floor(Math.random() * legal.length)];
-
-  return legal.sort((a, b) => {
-    const pa = nextPos(ghost.pos, a);
-    const pb = nextPos(ghost.pos, b);
-    const da = Math.abs(pa.r - player.r) + Math.abs(pa.c - player.c);
-    const db = Math.abs(pb.r - player.r) + Math.abs(pb.c - player.c);
-    return da - db;
-  })[0];
+  return legal.sort((a, b) => distance(moveWithWrap(board, ghost.pos, a), player) - distance(moveWithWrap(board, ghost.pos, b), player))[0];
 }
 
 function App() {
@@ -157,14 +217,13 @@ function App() {
   const [score, setScore] = useState(0);
   const [lives, setLives] = useState(3);
   const [player, setPlayer] = useState(board.playerStart);
-  const [direction, setDirection] = useState('left');
-  const [queuedDirection, setQueuedDirection] = useState('left');
+  const [direction, setDirection] = useState('right');
   const [pellets, setPellets] = useState(() => new Set(board.pellets));
   const [powerPellets, setPowerPellets] = useState(() => new Set(board.powerPellets));
   const [ghosts, setGhosts] = useState(() => makeGhosts(1, board));
   const [frightenedUntil, setFrightenedUntil] = useState(0);
   const [status, setStatus] = useState('ready');
-  const [message, setMessage] = useState('Press Start or an arrow key to play.');
+  const [message, setMessage] = useState('Press Start or an arrow key to play. Pac stays still until you move.');
   const [tick, setTick] = useState(0);
   const [scores, setScores] = useState(loadScores);
   const [initials, setInitials] = useState('PLAYER');
@@ -175,14 +234,35 @@ function App() {
   const remainingDots = pellets.size + powerPellets.size;
   const frightened = frightenedUntil > tick;
 
-  const resetPositions = useCallback((nextLives = lives) => {
-    setPlayer(board.playerStart);
-    setDirection('left');
-    setQueuedDirection('left');
+  const collectAt = useCallback((pos, currentTick) => {
+    const key = posKey(pos);
+    if (pellets.has(key)) {
+      setPellets((previous) => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+      setScore((value) => value + 10);
+    }
+    if (powerPellets.has(key)) {
+      setPowerPellets((previous) => {
+        const next = new Set(previous);
+        next.delete(key);
+        return next;
+      });
+      setScore((value) => value + 50);
+      setFrightenedUntil(currentTick + Math.max(18, 34 - level));
+      setMessage('Power pellet! Eat the ghosts while they are blue.');
+    }
+  }, [level, pellets, powerPellets]);
+
+  const resetPositions = useCallback((nextLives = lives, currentGhosts = ghosts) => {
     setGhosts(makeGhosts(level, board));
+    setPlayer(randomSpawn(board, currentGhosts));
+    setDirection('right');
     setFrightenedUntil(0);
     setLives(nextLives);
-  }, [board, level, lives]);
+  }, [board, ghosts, level, lives]);
 
   const startLevel = useCallback((nextLevel) => {
     const freshBoard = parseBoard();
@@ -191,11 +271,10 @@ function App() {
     setPowerPellets(new Set(freshBoard.powerPellets));
     setPlayer(freshBoard.playerStart);
     setGhosts(makeGhosts(nextLevel, freshBoard));
-    setDirection('left');
-    setQueuedDirection('left');
+    setDirection('right');
     setFrightenedUntil(0);
     setStatus('playing');
-    setMessage(`Level ${nextLevel}: clear every dot and dodge the ghosts.`);
+    setMessage(`Level ${nextLevel}: clear every reachable dot and dodge the ghosts.`);
     setSubmitted(false);
   }, []);
 
@@ -208,6 +287,7 @@ function App() {
   }, [startLevel]);
 
   const endGame = useCallback(() => {
+    playGameOverSound();
     setStatus('gameover');
     setMessage('Game over. Enter your name for the scoreboard.');
     setSubmitted(false);
@@ -221,56 +301,39 @@ function App() {
     setMessage('Score saved. Start a new game whenever you are ready.');
   }, [initials, level, score]);
 
-  const stepGame = useCallback(() => {
+  const movePlayer = useCallback((dir) => {
+    if (status === 'ready') setStatus('playing');
+    if (status !== 'playing' && status !== 'ready') return;
+    const currentTick = tickRef.current + 1;
+    tickRef.current = currentTick;
+    setTick(currentTick);
+    setDirection(dir);
+    setPlayer((currentPlayer) => {
+      const movedPlayer = moveWithWrap(board, currentPlayer, dir);
+      collectAt(movedPlayer, currentTick);
+      return movedPlayer;
+    });
+  }, [board, collectAt, status]);
+
+  const stepGhosts = useCallback(() => {
     if (status !== 'playing') return;
     const currentTick = tickRef.current + 1;
     tickRef.current = currentTick;
     setTick(currentTick);
-
-    setPlayer((currentPlayer) => {
-      let nextDirection = direction;
-      if (canMove(board, nextPos(currentPlayer, queuedDirection))) nextDirection = queuedDirection;
-      const candidate = nextPos(currentPlayer, nextDirection);
-      const movedPlayer = canMove(board, candidate) ? candidate : currentPlayer;
-      setDirection(nextDirection);
-
-      const key = posKey(movedPlayer);
-      if (pellets.has(key)) {
-        setPellets((previous) => {
-          const next = new Set(previous);
-          next.delete(key);
-          return next;
-        });
-        setScore((value) => value + 10);
-      }
-      if (powerPellets.has(key)) {
-        setPowerPellets((previous) => {
-          const next = new Set(previous);
-          next.delete(key);
-          return next;
-        });
-        setScore((value) => value + 50);
-        setFrightenedUntil(currentTick + Math.max(18, 34 - level));
-        setMessage('Power pellet! Eat the ghosts while they are blue.');
-      }
-      return movedPlayer;
-    });
-
     setGhosts((currentGhosts) => currentGhosts.map((ghost) => {
       const shouldMove = Math.random() < ghost.speedBias || currentTick % Math.max(2, 5 - Math.min(level, 3)) === 0;
       if (!shouldMove) return ghost;
       const ghostDir = chooseGhostDir(board, ghost, player, frightenedUntil > currentTick, currentTick);
-      const candidate = nextPos(ghost.pos, ghostDir);
-      return { ...ghost, dir: ghostDir, pos: canMove(board, candidate) ? candidate : ghost.pos };
+      return { ...ghost, dir: ghostDir, pos: moveWithWrap(board, ghost.pos, ghostDir) };
     }));
-  }, [board, direction, frightenedUntil, level, pellets, player, powerPellets, queuedDirection, status]);
+  }, [board, frightenedUntil, level, player, status]);
 
   useEffect(() => {
     if (status !== 'playing') return;
-    const speed = Math.max(95, 190 - level * 12);
-    const interval = window.setInterval(stepGame, speed);
+    const speed = Math.max(105, 210 - level * 10);
+    const interval = window.setInterval(stepGhosts, speed);
     return () => window.clearInterval(interval);
-  }, [level, status, stepGame]);
+  }, [level, status, stepGhosts]);
 
   useEffect(() => {
     if (status !== 'playing') return;
@@ -289,8 +352,9 @@ function App() {
       setLives(0);
       endGame();
     } else {
-      setMessage(`Ouch. ${nextLives} ${nextLives === 1 ? 'life' : 'lives'} left.`);
-      resetPositions(nextLives);
+      playDeathSound();
+      setMessage(`Ouch. Random respawn! ${nextLives} ${nextLives === 1 ? 'life' : 'lives'} left.`);
+      resetPositions(nextLives, ghosts);
     }
   }, [endGame, frightened, ghosts, lives, player, resetPositions, status]);
 
@@ -307,12 +371,11 @@ function App() {
       const dir = KEY_TO_DIR[event.key];
       if (!dir) return;
       event.preventDefault();
-      setQueuedDirection(dir);
-      if (status === 'ready') setStatus('playing');
+      movePlayer(dir);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [status]);
+  }, [movePlayer]);
 
   const cells = [];
   for (let r = 0; r < board.rows; r++) {
@@ -346,7 +409,7 @@ function App() {
         <div>
           <p className="eyebrow">Arcade Chomp</p>
           <h1>Clear the dots. Dodge the ghosts.</h1>
-          <p className="instructions">Pac-Man-style arcade play: use arrow keys or WASD, eat power pellets, chase blue ghosts, and climb the scoreboard.</p>
+          <p className="instructions">Use arrow keys or WASD. Pac only moves when you press a key, side tunnels wrap across the board, and every visible pellet is reachable.</p>
         </div>
         <div className="stats" aria-label="Game stats">
           <span>Score <strong>{score}</strong></span>
@@ -399,11 +462,11 @@ function App() {
       </section>
 
       <section className="controls" aria-label="Game controls">
-        <button onClick={() => { setQueuedDirection('up'); if (status === 'ready') setStatus('playing'); }} aria-label="Move up">↑</button>
+        <button onClick={() => movePlayer('up')} aria-label="Move up">↑</button>
         <div className="middle-row">
-          <button onClick={() => { setQueuedDirection('left'); if (status === 'ready') setStatus('playing'); }} aria-label="Move left">←</button>
-          <button onClick={() => { setQueuedDirection('down'); if (status === 'ready') setStatus('playing'); }} aria-label="Move down">↓</button>
-          <button onClick={() => { setQueuedDirection('right'); if (status === 'ready') setStatus('playing'); }} aria-label="Move right">→</button>
+          <button onClick={() => movePlayer('left')} aria-label="Move left">←</button>
+          <button onClick={() => movePlayer('down')} aria-label="Move down">↓</button>
+          <button onClick={() => movePlayer('right')} aria-label="Move right">→</button>
         </div>
       </section>
 

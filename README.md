@@ -6,12 +6,14 @@ This is an original arcade-chase implementation inspired by classic maze-chase m
 
 ## Gameplay
 
-- Use arrow keys or WASD to steer.
+- Use arrow keys or WASD to move one tile at a time; the character stays still when no key is pressed.
 - Eat pellets for points.
 - Eat power pellets to turn ghosts blue and make them edible for a short time.
-- Clear all pellets to advance to the next level.
+- Use side tunnels to wrap from one side of the board to the other.
+- Clear all reachable pellets to advance to the next level.
 - Levels increase speed/difficulty.
-- You have 3 lives.
+- You have 3 lives; dying triggers a sound and respawns you at a random safe location.
+- Game over has a separate sound.
 - On game over, enter your name to save a local high score in browser localStorage.
 
 ## Development
