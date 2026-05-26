@@ -1,11 +1,14 @@
-# Random Maze Runner — Project Context
+# Arcade Chomp — Project Context
 
 ## Purpose
-A standalone React + Vite browser game where the player navigates a randomly generated 2D maze from Start to End. Completing a level shows a congratulations message and advances to a harder randomly generated level.
+A standalone React + Vite Pac-Man-style arcade chase game. The player clears pellets, avoids ghosts, eats power pellets, advances through levels, and records high scores locally.
+
+## Important IP Note
+Keep this as an original arcade-chase game. Do not copy Pac-Man/Ms. Pac-Man copyrighted assets, exact level art, names, logos, sounds, or sprites. Use original names, CSS shapes, and mechanics inspired by the genre.
 
 ## Architecture
-- `src/main.jsx`: React app, maze generation, player movement, level progression, localStorage best moves.
-- `src/styles.css`: dark arcade visual design and responsive maze layout.
+- `src/main.jsx`: React app, board map, player movement, ghost AI, score/lives/level progression, localStorage scoreboard.
+- `src/styles.css`: arcade visual design, board, pellets, player, ghosts, mobile controls, scoreboard.
 - Static/client-side only; no backend.
 
 ## Commands
@@ -14,7 +17,7 @@ A standalone React + Vite browser game where the player navigates a randomly gen
 - `npm run build` — production build.
 
 ## Future-Agent Notes
-- Preserve arrow-key and WASD controls.
-- Maze generation must always produce solvable mazes; current implementation uses recursive backtracking/DFS.
-- Keep the UI responsive and touch-friendly.
-- User wants each project to retain its own context in this file.
+- Preserve keyboard controls: arrow keys and WASD.
+- Preserve touch/mobile directional controls.
+- Preserve high-score entry and localStorage scoreboard.
+- The user wants project-specific context retained in this file and mirrored via `CLOUDCODE.md`.
