@@ -177,10 +177,14 @@ function App() {
                 key={`${cell.r}-${cell.c}`}
                 className={classes}
                 style={{
-                  borderTopWidth: cell.walls.top ? 3 : 1,
-                  borderRightWidth: cell.walls.right ? 3 : 1,
-                  borderBottomWidth: cell.walls.bottom ? 3 : 1,
-                  borderLeftWidth: cell.walls.left ? 3 : 1,
+                  borderTopWidth: cell.walls.top ? 4 : 1,
+                  borderRightWidth: cell.walls.right ? 4 : 1,
+                  borderBottomWidth: cell.walls.bottom ? 4 : 1,
+                  borderLeftWidth: cell.walls.left ? 4 : 1,
+                  borderTopColor: cell.walls.top ? '#f8fbff' : 'rgba(120, 223, 255, 0.08)',
+                  borderRightColor: cell.walls.right ? '#f8fbff' : 'rgba(120, 223, 255, 0.08)',
+                  borderBottomColor: cell.walls.bottom ? '#f8fbff' : 'rgba(120, 223, 255, 0.08)',
+                  borderLeftColor: cell.walls.left ? '#f8fbff' : 'rgba(120, 223, 255, 0.08)',
                 }}
                 role="gridcell"
                 aria-label={isPlayer ? 'Player position' : isStart ? 'Start' : isEnd ? 'End' : 'Open maze cell'}
